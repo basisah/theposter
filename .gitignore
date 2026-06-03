@@ -1,0 +1,21 @@
+# Virtual environment
+posteragent/
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+
+# OS
+.DS_Store
