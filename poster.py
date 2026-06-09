@@ -1,8 +1,10 @@
 import random 
 from googleapiclient.discovery import build
-import anthropic
+import openai
 import requests
-
+import response
+from google.oauth2 import service_account
+import os
 
 # Function to pick random image from list of google drive subfolders
 def pick_image(google_drive, folder_id):
@@ -12,10 +14,15 @@ def pick_image(google_drive, folder_id):
     selected_image = random.choice(images)
     return selected_image
 
+#generates caption for the image using openai's language model
 def gen_caption(image_url, category):
-    client = anthropic.Client()
-    response = client.message.create()
-
+    client = openai.OpenAI()
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "user", "content": f"Generate a caption for an image in the {category} category."}
+        ]
+    )
     return response.content.text
 
 # Returns hourly breakdown of when your followers are online
@@ -26,7 +33,6 @@ def get_best_posting_time(page_id,access_token):
         'metric': 'page_impressions_by_day',
         'access_token': access_token
     }
-    pass
 
 def post_facebook():
     pass
