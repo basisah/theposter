@@ -1,8 +1,10 @@
-import random 
+from datetime import datetime, timedelta
+import random
+import time 
+import requests
+from openai import OpenAI
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
-import openai
-import requests
 from google.oauth2 import service_account
 import os
 
@@ -12,6 +14,25 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FB_TOKEN = os.getenv("FACEBOOK_ACCESS_TOKEN")
 FB_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+
+BEST_TIMES = {
+    0: [8, 13, 21],   # Monday
+    1: [8, 13, 21],   # Tuesday
+    2: [8, 14, 21],   # Wednesday
+    3: [8, 13, 22],   # Thursday
+    4: [11, 15, 22],  # Friday (weekend in BD — Fri/Sat — people up later)
+    5: [10, 14, 22],  # Saturday
+    6: [9, 13, 21],   # Sunday
+}
+
+DAYS_AHEAD = 7
+
+# man in the loop  
+# Set to True to show the selected image and caption to approve without posting to fb
+DRY_RUN = True 
+
+
+
  
 
 SERVICE_ACCOUNT_FILE = "service_account.json"
@@ -53,15 +74,26 @@ def pick_image(google_drive, folder_id):
     return selected_image
 
 #generates caption for the image using openai's language model
-def gen_caption(image_url, category):
-    client = openai.OpenAI()
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "user", "content": f"Generate a caption for an image in the {category} category."}
-        ]
+def generate_caption(client, category):
+    prompt = (
+        f"You write Facebook captions for 'Trendy Design by Shila Noor', a South "
+        f"Asian fashion boutique with a mostly Bangladeshi audience. Write ONE "
+        f"caption for a photo in the '{category}' category, optimized for maximum engagement:\n"
+        f"- Open with a short, scroll-stopping hook (the first 5-7 words matter most)\n"
+        f"- Make it warm, relatable, and culturally resonant\n"
+        f"- End with a question or invitation that encourages people to comment "
+        f"(comments drive reach more than likes)\n"
+        f"- Add 3-5 relevant hashtags, mixing broad and niche\n"
+        f"- Keep it under 60 words. Return only the caption."
     )
-    return response.choices[0].message.content
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "user", "content":prompt}
+        ],
+        max_tokens=300,
+    )
+    return response.choices[0].message.content.strip()
 
 # Returns hourly breakdown of when your followers are online
 # Pick top 3 hours from today's day-of-week data
@@ -74,20 +106,99 @@ def get_best_posting_time(page_id,access_token):
     response = requests.get(url, params=params)
     return response.json()
 
+def scheduled_unix(day_offset, hour_local):
+    """
+    Compute a unix timestamp for `day_offset` days from now at `hour_local`,
+    converted to UTC. Facebook requires the time to be 10 min to 6 months out.
+    """
+    target_local = (datetime.now() + timedelta(days=day_offset)).replace(
+        hour=hour_local, minute=0, second=0, microsecond=0
+    )
+    target_utc = target_local + timedelta(hours=LOCAL_UTC_OFFSET_HOURS)
+    return int(target_utc.timestamp())
+ 
+ 
 
-Best_time = {
-    0: [9, 13, 20],   # Monday
-    1: [8, 12, 21],   # Tuesday
-    2: [9, 14, 20],   # Wednesday
-    3: [8, 13, 21],   # Thursday
-    4: [11, 15, 21],  # Friday
-    5: [10, 15, 22],  # Saturday
-    6: [11, 14, 21],  # Sunday
-}
+# post the photo as scheduled on facebook using the facebook graph api
+def post_facebook(image_url, caption, access_token, page_id):
+    url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/photos"
+    with open(image_path, "rb") as img:
+        files = {"source": img}
+        data = {
+            "caption": caption,
+            "published": "false",
+            "scheduled_publish_time": str(publish_unix),
+            "access_token": FB_TOKEN,
+        }
+        r = requests.post(url, files=files, data=data, timeout=60)
+    if r.status_code != 200:
+        raise RuntimeError(f"Facebook error {r.status_code}: {r.text}")
+    return r.json()
+ 
+ 
 
-
-def post_facebook():
-    pass
+def main():
+    missing = [
+        k
+        for k, v in {
+            "OPENAI_API_KEY": OPENAI_API_KEY,
+            "FACEBOOK_ACCESS_TOKEN": FB_TOKEN,
+            "FACEBOOK_PAGE_ID": FB_PAGE_ID,
+            "GOOGLE_DRIVE_FOLDER_ID": DRIVE_FOLDER_ID,
+        }.items()
+        if not v
+    ]
+    if missing:
+        raise SystemExit(f"Missing env vars: {', '.join(missing)}")
+ 
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    drive = get_drive_service()
+ 
+    print("Building image pool from Drive...")
+    pool = build_image_pool(drive, DRIVE_FOLDER_ID)
+    print(f"  found {len(pool)} images across categories.")
+ 
+    os.makedirs("tmp", exist_ok=True)
+    used_ids = set()
+ 
+    for day in range(DAYS_AHEAD):
+        weekday = (datetime.now() + timedelta(days=day)).weekday()
+        hours = BEST_TIMES[weekday]
+ 
+        # pick 3 distinct images for the day, avoiding repeats where possible
+        available = [p for p in pool if p["file_id"] not in used_ids]
+        if len(available) < len(hours):
+            # ran out of fresh images; allow reuse
+            available = pool
+        picks = random.sample(available, len(hours))
+ 
+        for slot, (img, hour) in enumerate(zip(picks, hours)):
+            used_ids.add(img["file_id"])
+            caption = generate_caption(openai_client, img["category"])
+            when = scheduled_unix(day, hour)
+            when_str = datetime.fromtimestamp(when).strftime("%Y-%m-%d %H:%M UTC")
+ 
+            print(f"\nDay +{day} slot {slot+1}  [{img['category']}]  {img['name']}")
+            print(f"  schedule: {when_str}")
+            print(f"  caption : {caption}")
+ 
+            if DRY_RUN:
+                print("  DRY_RUN: not posting.")
+                continue
+ 
+            local_path = download_image(drive, img["file_id"], f"tmp/{img['name']}")
+            result = schedule_photo_post(local_path, caption, when)
+            print(f"  posted id: {result.get('id') or result.get('post_id')}")
+            time.sleep(2)  # be gentle with the API
+ 
+    print("\nDone.")
+    if DRY_RUN:
+        print("This was a DRY RUN. Set DRY_RUN = False to actually schedule posts.")
+ 
+ 
+if __name__ == "__main__":
+    main()
+ 
 
 
 
