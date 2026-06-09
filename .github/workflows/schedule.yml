@@ -1,3 +1,13 @@
+name: Daily Post Schedule
 on:
     schedule:
         - cron: '8 13 * * *' # Runs every day at 13:08 UTC
+
+jobs:
+    post:
+        runs-on: ubuntu-latest
+        steps:
+            -uses: actions/checkout@v4
+            -name: Run poster script
+              run: python3 poster.py
+              
