@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 import os
+import io
+from googleapiclient.http import MediaIoBaseDownload
 
 load_dotenv()
  
@@ -26,7 +28,7 @@ BEST_TIMES = {
 }
 
 DAYS_AHEAD = 7
-
+LOCAL_UTC_OFFSET_HOURS = 6  # Bangladesh is UTC+6
 # man in the loop  
 # Set to True to show the selected image and caption to approve without posting to fb
 DRY_RUN = True 
@@ -40,10 +42,33 @@ DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 #function to get acess to the google drive folders
 def get_google_drive_service():
-    creds =  creds = service_account.Credentials.from_service_account_file(
+    creds = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=DRIVE_SCOPES
     )
     return build('drive', 'v3', credentials=creds)
+
+#build the bunch of images from the google drive folder and subfolders into a pool to pick from
+def build_image_pool(google_drive, folder_id):
+    pool = []
+    subfolders = list_subfolders(google_drive, folder_id)
+    if not subfolders:
+        raise RuntimeError(f"No subfolders found in Drive folder {folder_id}")
+    for sub in subfolders:
+        for img in list_images(google_drive, sub["id"]):
+            pool.append({"category": sub["name"], "file_id": img["id"], "name": img["name"]})
+    if not pool:
+        raise RuntimeError("Found subfolders but no images inside them.")
+    return pool
+
+def download_image(google_drive, file_id, dest_path):
+    request = google_drive.files().get_media(fileId=file_id)
+    fh = io.FileIO(dest_path, "wb")
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    fh.close()
+    return dest_path
 
 #function to return all the images in a google drive folder
 def list_subfolders(google_drive, folder_id):
@@ -58,7 +83,7 @@ def list_subfolders(google_drive, folder_id):
 #function to return all the images in the google drive folder
 def list_images(google_drive, folder_id):
     q = (
-        f "'{folder_id}' in parents "          # was parent_id
+        f"'{folder_id}' in parents "
         "and mimeType contains 'image/' "
         "and trashed = false"
     )
@@ -120,7 +145,7 @@ def scheduled_unix(day_offset, hour_local):
  
 
 # post the photo as scheduled on facebook using the facebook graph api
-def post_facebook(image_url, caption, access_token, page_id):
+def schedule_photo_post(image_path, caption, publish_unix):
     url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/photos"
     with open(image_path, "rb") as img:
         files = {"source": img}
@@ -152,7 +177,7 @@ def main():
         raise SystemExit(f"Missing env vars: {', '.join(missing)}")
  
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    drive = get_drive_service()
+    drive = get_google_drive_service()
  
     print("Building image pool from Drive...")
     pool = build_image_pool(drive, DRIVE_FOLDER_ID)
