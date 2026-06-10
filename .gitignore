@@ -20,3 +20,12 @@ build/
 # OS
 .DS_Store
 service_account.json
+
+tmp/
+*.jpg
+*.jpeg
+*.heic
+*.png
+.env
+service_account.json
+__pycache__/
