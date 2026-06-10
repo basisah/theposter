@@ -199,7 +199,7 @@ def main():
  
         for slot, (img, hour) in enumerate(zip(picks, hours)):
             used_ids.add(img["file_id"])
-            caption = generate_caption(openai_client, img["category"])
+            caption = generate_caption(openai_client, img["category"], image_bytes=download_image_bytes(drive, img["file_id"]), filename=img["name"])
             when = scheduled_unix(day, hour)
             when_str = datetime.fromtimestamp(when, BD_TZ).strftime("%Y-%m-%d %H:%M BD")
             print(f"\nDay +{day} slot {slot+1}  [{img['category']}]  {img['name']}")
