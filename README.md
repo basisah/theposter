@@ -15,17 +15,22 @@ edit, or delete them before they go live.
 Step 1. Get the code
 git clone https://github.com/basisah/theposter.git
 cd theposter
+
 Step 2. (Recommended) Create and activate a virtual environment
 python3 -m venv posteragent
 source posteragent/bin/activate
+
 Step 3. Install the dependencies
 pip install google-api-python-client google-auth openai requests python-dotenv
+
 Step 4. Add your Google key
 Put your service_account.json (the Google Cloud service account key) in the
 project folder. The Drive folder must be shared with the service account's
 email address (Viewer access is enough).
+
 Step 5. Create your .env file
 In the project folder, make a file named .env with these four lines:
+
 OPENAI_API_KEY=sk-...
 FACEBOOK_ACCESS_TOKEN=your_long_lived_PAGE_token
 FACEBOOK_PAGE_ID=your_page_id
