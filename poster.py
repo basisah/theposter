@@ -153,20 +153,32 @@ def scheduled_unix(day_offset, hour_local):
 
 # post the photo as scheduled on facebook using the facebook graph api
 def schedule_photo_post(image_path, caption, publish_unix):
-    url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/photos"
+    # 1. Upload the photo UNPUBLISHED (no scheduling here) -> get its id
+    upload_url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/photos"
     with open(image_path, "rb") as img:
-        files = {"source": img}
-        data = {
-            "caption": caption,
-            "published": "false",
-            "scheduled_publish_time": str(publish_unix),
-            "access_token": FB_TOKEN,
-        }
-        r = requests.post(url, files=files, data=data, timeout=60)
+        up = requests.post(
+            upload_url,
+            files={"source": img},
+            data={"published": "false", "access_token": FB_TOKEN},
+            timeout=60,
+        )
+    if up.status_code != 200:
+        raise RuntimeError(f"Photo upload error {up.status_code}: {up.text}")
+    photo_id = up.json()["id"]
+
+    # 2. Create a SCHEDULED feed post that attaches the photo
+    feed_url = f"https://graph.facebook.com/v21.0/{FB_PAGE_ID}/feed"
+    data = {
+        "message": caption,
+        "attached_media[0]": f'{{"media_fbid":"{photo_id}"}}',
+        "published": "false",
+        "scheduled_publish_time": str(publish_unix),
+        "access_token": FB_TOKEN,
+    }
+    r = requests.post(feed_url, data=data, timeout=60)
     if r.status_code != 200:
-        raise RuntimeError(f"Facebook error {r.status_code}: {r.text}")
+        raise RuntimeError(f"Feed schedule error {r.status_code}: {r.text}")
     return r.json()
- 
  
 
 def main():
