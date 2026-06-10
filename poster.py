@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from fileinput import filename
 import random
 import time 
 import requests
@@ -9,6 +10,8 @@ from google.oauth2 import service_account
 import os
 import io
 from googleapiclient.http import MediaIoBaseDownload
+import base64
+
 
 load_dotenv()
  
@@ -28,14 +31,11 @@ BEST_TIMES = {
 }
 
 DAYS_AHEAD = 7
-LOCAL_UTC_OFFSET_HOURS = 6  # Bangladesh is UTC+6
+BD_TZ = timezone(timedelta(hours=6))  # Bangladesh UTC+6
 # man in the loop  
 # Set to True to show the selected image and caption to approve without posting to fb
-DRY_RUN = True 
+DRY_RUN = False
 
-
-
- 
 
 SERVICE_ACCOUNT_FILE = "service_account.json"
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
@@ -60,6 +60,7 @@ def build_image_pool(google_drive, folder_id):
         raise RuntimeError("Found subfolders but no images inside them.")
     return pool
 
+#function to download the image from google drive using the file id and save it to a local path
 def download_image(google_drive, file_id, dest_path):
     request = google_drive.files().get_media(fileId=file_id)
     fh = io.FileIO(dest_path, "wb")
@@ -90,6 +91,16 @@ def list_images(google_drive, folder_id):
     res = google_drive.files().list(q=q, fields="files(id, name)").execute()
     return res.get("files", [])
 
+#function to download the image bytes from google drive using the file id
+def download_image_bytes(google_drive, file_id):
+    request = google_drive.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return fh.getvalue()
+
 # Function to pick random image from list of google drive subfolders
 def pick_image(google_drive, folder_id):
     subfolders = list_subfolders(google_drive, folder_id)
@@ -99,49 +110,38 @@ def pick_image(google_drive, folder_id):
     return selected_image
 
 #generates caption for the image using openai's language model
-def generate_caption(client, category):
+def generate_caption(client, category, image_bytes, filename):
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    name_hint = os.path.splitext(filename)[0]  # filename without .jpg
+
     prompt = (
-        f"You write Facebook captions for 'Trendy Design by Shila Noor', a South "
-        f"Asian fashion boutique with a mostly Bangladeshi audience. Write ONE "
-        f"caption for a photo in the '{category}' category, optimized for maximum engagement:\n"
-        f"- Open with a short, scroll-stopping hook (the first 5-7 words matter most)\n"
-        f"- Make it warm, relatable, and culturally resonant\n"
-        f"- End with a question or invitation that encourages people to comment "
-        f"(comments drive reach more than likes)\n"
-        f"- Add 3-5 relevant hashtags, mixing broad and niche\n"
-        f"- Keep it under 60 words. Return only the caption."
+        "You write Facebook captions for 'Trendy Design by Shila Noor', a South "
+        f"Asian fashion boutique with a mostly Bangladeshi audience. This photo is "
+        f"in the '{category}' category. Look carefully at the image and describe ONLY "
+        "what you actually see — the real garment type, fabric, and colours. Do not "
+        "invent details that aren't visible. "
+        f"If '{name_hint}' looks like a person's name, you may use it as the client's "
+        "name; if it looks like a random filename or code, do NOT use it and don't "
+        "mention any name. "
+        "Write ONE caption optimized for engagement: a short scroll-stopping hook, "
+        "warm and culturally resonant, ending with a question that invites comments, "
+        "plus 3-5 relevant hashtags. Under 60 words. Return only the caption."
     )
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "user", "content":prompt}
         ],
-        max_tokens=300,
+        max_tokens=400,
     )
     return response.choices[0].message.content.strip()
 
-# Returns hourly breakdown of when your followers are online
-# Pick top 3 hours from today's day-of-week data
-def get_best_posting_time(page_id,access_token):
-    url = f"https://graph.facebook.com/{page_id}/insights"
-    params = {
-        'metric': 'page_fans_online_per_day',
-        'access_token': access_token
-    }
-    response = requests.get(url, params=params)
-    return response.json()
-
+#function to calculate the unix timestamp for scheduling the facebook post based on the day offset and local hour
 def scheduled_unix(day_offset, hour_local):
-    """
-    Compute a unix timestamp for `day_offset` days from now at `hour_local`,
-    converted to UTC. Facebook requires the time to be 10 min to 6 months out.
-    """
-    target_local = (datetime.now() + timedelta(days=day_offset)).replace(
+    target = (datetime.now(BD_TZ) + timedelta(days=day_offset)).replace(
         hour=hour_local, minute=0, second=0, microsecond=0
     )
-    target_utc = target_local + timedelta(hours=LOCAL_UTC_OFFSET_HOURS)
-    return int(target_utc.timestamp())
- 
+    return int(target.timestamp())
  
 
 # post the photo as scheduled on facebook using the facebook graph api
@@ -186,7 +186,7 @@ def main():
     os.makedirs("tmp", exist_ok=True)
     used_ids = set()
  
-    for day in range(DAYS_AHEAD):
+    for day in range(1, DAYS_AHEAD + 1):
         weekday = (datetime.now() + timedelta(days=day)).weekday()
         hours = BEST_TIMES[weekday]
  
@@ -201,8 +201,7 @@ def main():
             used_ids.add(img["file_id"])
             caption = generate_caption(openai_client, img["category"])
             when = scheduled_unix(day, hour)
-            when_str = datetime.fromtimestamp(when).strftime("%Y-%m-%d %H:%M UTC")
- 
+            when_str = datetime.fromtimestamp(when, BD_TZ).strftime("%Y-%m-%d %H:%M BD")
             print(f"\nDay +{day} slot {slot+1}  [{img['category']}]  {img['name']}")
             print(f"  schedule: {when_str}")
             print(f"  caption : {caption}")
