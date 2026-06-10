@@ -116,17 +116,18 @@ def generate_caption(client, category, image_bytes, filename):
     name_hint = os.path.splitext(filename)[0]  # filename without .jpg
 
     prompt = (
-        "You write Facebook captions for 'Trendy Design by Shila Noor', a South "
+        f"You write Facebook captions for 'Trendy Design by Shila Noor', a South "
         f"Asian fashion boutique with a mostly Bangladeshi audience. This photo is "
-        f"in the '{category}' category. Look carefully at the image and describe ONLY "
-        "what you actually see — the real garment type, fabric, and colours. Do not "
-        "invent details that aren't visible. "
+        f"in the '{category}' category. Look carefully at the image and name the EXACT garment type you see "
+        f"(salwar kameez, saree, lehenga, kurti, etc.) — do not use vague words "
+        f"like 'ensemble' or 'outfit'. Describe the real fabric and colours. "
+        f"Do not invent details that aren't visible. "
         f"If '{name_hint}' looks like a person's name, you may use it as the client's "
-        "name; if it looks like a random filename or code, do NOT use it and don't "
-        "mention any name. "
-        "Write ONE caption optimized for engagement: a short scroll-stopping hook, "
-        "warm and culturally resonant, ending with a question that invites comments, "
-        "plus 3-5 relevant hashtags. Under 60 words. Return only the caption."
+        f"name; if it looks like a random filename or code, do NOT use it and don't "
+        f"mention any name. "
+        f"Write ONE caption optimized for engagement: a short scroll-stopping hook, "
+        f"warm and culturally resonant, ending with a question that invites comments, "
+        f"plus 3-5 relevant hashtags. Under 60 words. Return only the caption."
     )
     response = client.chat.completions.create(
         model="gpt-4o",
