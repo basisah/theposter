@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from fileinput import filename
 import random
-import time 
+import time
+from xmlrpc import client 
 import requests
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -129,9 +130,14 @@ def generate_caption(client, category, image_bytes, filename):
     )
     response = client.chat.completions.create(
         model="gpt-4o",
-        messages=[
-            {"role": "user", "content":prompt}
-        ],
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+            ],
+        }],
         max_tokens=400,
     )
     return response.choices[0].message.content.strip()
