@@ -1,13 +1,30 @@
-name: Daily Post Schedule
+name: Weekly FB Scheduler
+
 on:
-    schedule:
-        - cron: '8 13 * * *' # Runs every day at 13:08 UTC
+  schedule:
+    - cron: '0 1 * * 1'   # Mondays 01:00 UTC (~7am Bangladesh)
+  workflow_dispatch:        # lets you trigger it manually from the Actions tab
 
 jobs:
-    post:
-        runs-on: ubuntu-latest
-        steps:
-            -uses: actions/checkout@v4
-            -name: Run poster script
-              run: python3 poster.py
-              
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install google-api-python-client google-auth openai requests python-dotenv
+
+      - name: Write service account file
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: Run agent
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        run: python agent.py
