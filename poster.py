@@ -187,7 +187,7 @@ def main():
     used_ids = set()
  
     for day in range(1, DAYS_AHEAD + 1):
-        weekday = (datetime.now() + timedelta(days=day)).weekday()
+        weekday = (datetime.now(BD_TZ) + timedelta(days=day)).weekday()
         hours = BEST_TIMES[weekday]
  
         # pick 3 distinct images for the day, avoiding repeats where possible
@@ -225,7 +225,7 @@ if __name__ == "__main__":
  
 
 
-
+\
 
 
 
